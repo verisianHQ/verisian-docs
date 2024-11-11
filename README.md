@@ -1,5 +1,9 @@
-# verisian-docs
+# Welcome to the verisian-docs repository
 
-Home of all Verisian Platform documentation!
+## Documentation
 
 Find it in our [Wiki](https://github.com/verisianHQ/verisian-docs/wiki)
+
+## Examples
+
+Soon to come...
