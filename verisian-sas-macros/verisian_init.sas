@@ -18,80 +18,94 @@
     option nomprint;
     option nonotes;
 
-    %macro verisian_is_blank(param);
-        %sysevalf(%superq(param)=,boolean) %mend verisian_is_blank;
+   %macro verisian_is_blank(param);
+    %sysevalf(%superq(param)=,boolean) %mend verisian_is_blank;
 
-        %local _vinit_i lib_datasets cur_lib_ds ln dn data_set_num;
+    %local i lib_datasets cur_lib_ds ln dn data_set_num;
 
-        %put ;
+    %put ;
 
-        %if %verisian_is_blank(&library)=0 %then %do;
+    %if %verisian_is_blank(&library)=0 and %verisian_is_blank(&datasets)=1  %then %do; %*only lib provided;
 
-            proc sql noprint;
-                %* Put into macro var;
-                select catx('.', libname, memname) into :lib_datasets separated
-                    by ' ' from dictionary.tables where
-                    libname=upcase("&library") ORDER BY memname ASC;
-            quit;
+        proc sql noprint;
+            %* Put into macro var;
+            select catx('.', libname, memname) into :lib_datasets separated
+                by ' ' from dictionary.tables where
+                libname=upcase("&library") ORDER BY memname ASC;
+        quit;
 
-            %let datasets=&lib_datasets;
-        %end;
+        %let datasets=&lib_datasets;
+    %end;
 
-        %* Loop through each dataset in the input list;
-        %do _vinit_i=1 %to %sysfunc(countw(&datasets, %str( )));
+    %* Loop through each dataset in the input list;
+    %do i=1 %to %sysfunc(countw(&datasets, %str( )));
 
-            %* Extract the dataset name;
-            %let cur_lib_ds=%scan(&datasets, &_vinit_i, %str( ));
+        %* Extract the dataset name;
+        %let cur_lib_ds=%scan(&datasets, &i, %str( ));
+        %if %eval(%sysfunc(findc(&cur_lib_ds,".")))>0 %then %do; %*case that lib.ds notation is available;
             %let ln=%scan(&cur_lib_ds, 1, ".");
             %let dn=%scan(&cur_lib_ds, 2, ".");
-
-            %* Display dataset metadata to the log;
-            proc sql noprint;
-                select count(*) into :data_set_num from dictionary.tables where
-                    libname=upcase("&ln") and memname=upcase("&dn");
-            quit;
-
-            %if &data_set_num > 0 %then %do;
-                %* If we are printing a whole library, add null steps to link datasets to;
-                %if %verisian_is_blank(&library)=0 %then %do;
-                    option mprint;
-
-                    data _null_;
-                        %str( * &cur_lib_ds was found in the environment);
-                    run;
-                    option nomprint;
-                %end;
-
-                %* Retrieve the variable metadata;
-                proc sql noprint;
-                    create table ds_vars as select * from dictionary.columns
-                        where libname=upcase("&ln") and memname=upcase("&dn");
-                quit;
-
-                %* Print to log;
-                data _null_;
-                    set ds_vars;
-
-                    length elabel $200;
-                    elabel=strip(tranwrd(tranwrd(label, '"', ''), "'", ''));
-
-                    putlog 'verisian-lib:' libname+(-1) '|||ds:' memname+(-1)
-                        '|||var:' name+(-1) '|||label:"' elabel+(-1) '"|||type:'
-                        type+(-1) '|||length:' length+(-1) '|||format:'
-                        format+(-1);
-                run;
-            %end;
-            %else %do;
-                %put lib:&ln|||ds:&dn|||DOESNOTEXIST;
-            %end;
+        %end;
+        %else %if %verisian_is_blank(&library)=0 and %verisian_is_blank(&datasets)=0 %then %do; %*lib.ds notation not in use, use lib from library and datasets from datasets;
+            %let ln=&library;
+            %let dn=&cur_lib_ds;
+        %END;
+        %else %if %verisian_is_blank(&library)=1 and %verisian_is_blank(&datasets)=0 %then %do; %*lib is blank and dataset is filled, use lib work ;
+            %let ln=work;
+            %let dn=&cur_lib_ds;
         %end;
 
-        %put ;
-        option notes;
-        option mprint;
 
-    %mend v_init;
 
+        %* Display dataset metadata to the log;
+        proc sql noprint;
+            select count(*) into :data_set_num from dictionary.tables where
+                libname=upcase("&ln") and memname=upcase("&dn");
+        quit;
+
+        %if %eval(&data_set_num) > 0 %then %do;
+            %* If we are printing a whole library, add null steps to link datasets to;
+            %if %verisian_is_blank(&library)=0 and %verisian_is_blank(&datasets)=1 %then %do;
+                option mprint;
+
+                data _null_;
+                    %str( * &cur_lib_ds was found in the environment);
+                run;
+                option nomprint;
+            %end;
+
+            %* Retrieve the variable metadata;
+            proc sql noprint;
+                create table _ds_vars as select * from dictionary.columns
+                    where libname=upcase("&ln") and memname=upcase("&dn");
+            quit;
+
+            %* Print to log;
+            data _null_;
+                set _ds_vars;
+
+                length elabel $200;
+                elabel=strip(tranwrd(tranwrd(label, '"', ''), "'", ''));
+
+                putlog 'verisian-lib:' libname+(-1) '|||ds:' memname+(-1)
+                    '|||var:' name+(-1) '|||label:"' elabel+(-1) '"|||type:'
+                    type+(-1) '|||length:' length+(-1) '|||format:'
+                    format+(-1);
+            run;
+            proc datasets lib=work nolist;
+                delete _ds_vars;
+            QUIT;
+        %end;
+        %else %do;
+            %put lib:&ln|||ds:&dn|||DOESNOTEXIST;
+        %end;
+    %end;
+
+    %put ;
+    option notes;
+    option mprint;
+
+%mend v_init;
     /*
      * Testing;
     options dlcreatedir;
