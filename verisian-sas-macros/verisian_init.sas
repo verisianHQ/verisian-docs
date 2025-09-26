@@ -13,13 +13,28 @@
  * there will be a single line entry for the dataset like:
  *
  * lib:work,ds:qs_x,DOESNOTEXIST
+ *
+ * Toggle control:
+ * A global toggle variable `verisian_toggle` can be defined once to control
+ * whether the macro executes.
+ *   %global verisian_toggle;
+ *   %let verisian_toggle = 1;   /* 1 = run, 0 = skip */
+ *
+ * If `verisian_toggle` is not defined, the macro sets it to 1 by default.
  **/
 %macro v_init(datasets=, library=);
-    option nomprint;
-    option nonotes;
+    /* Set default if not already defined */
+    %if not %symexist(verisian_toggle) %then %let verisian_toggle = 1;
 
-    %macro verisian_is_blank(param);
-        %sysevalf(%superq(param)=,boolean) %mend verisian_is_blank;
+    %* Only run if verisian_toggle is ON (1);
+    %if &verisian_toggle %then %do;
+
+        option nomprint;
+        option nonotes;
+
+        %macro verisian_is_blank(param);
+            %sysevalf(%superq(param)=,boolean)
+        %mend verisian_is_blank;
 
         %local _vinit_i lib_datasets cur_lib_ds ln dn data_set_num;
 
@@ -29,9 +44,11 @@
 
             proc sql noprint;
                 %* Put into macro var;
-                select catx('.', libname, memname) into :lib_datasets separated
-                    by ' ' from dictionary.tables where
-                    libname=upcase("&library") ORDER BY memname ASC;
+                select catx('.', libname, memname)
+                       into :lib_datasets separated by ' '
+                from dictionary.tables
+                where libname=upcase("&library")
+                order by memname asc;
             quit;
 
             %let datasets=&lib_datasets;
@@ -40,15 +57,23 @@
         %* Loop through each dataset in the input list;
         %do _vinit_i=1 %to %sysfunc(countw(&datasets, %str( )));
 
-            %* Extract the dataset name;
+            %* Extract the library and dataset name;
             %let cur_lib_ds=%scan(&datasets, &_vinit_i, %str( ));
-            %let ln=%scan(&cur_lib_ds, 1, ".");
-            %let dn=%scan(&cur_lib_ds, 2, ".");
+
+            %if %index(&cur_lib_ds,.) > 0 %then %do;
+                %let ln=%scan(&cur_lib_ds, 1, ".");
+                %let dn=%scan(&cur_lib_ds, 2, ".");
+            %end;
+            %else %do;
+                %let ln=WORK;
+                %let dn=&cur_lib_ds;
+            %end;
 
             %* Display dataset metadata to the log;
             proc sql noprint;
-                select count(*) into :data_set_num from dictionary.tables where
-                    libname=upcase("&ln") and memname=upcase("&dn");
+                select count(*) into :data_set_num
+                from dictionary.tables
+                where libname=upcase("&ln") and memname=upcase("&dn");
             quit;
 
             %if &data_set_num > 0 %then %do;
@@ -64,8 +89,11 @@
 
                 %* Retrieve the variable metadata;
                 proc sql noprint;
-                    create table ds_vars as select * from dictionary.columns
-                        where libname=upcase("&ln") and memname=upcase("&dn");
+                    create table ds_vars as
+                    select *
+                    from dictionary.columns
+                    where libname=upcase("&ln")
+                      and memname=upcase("&dn");
                 quit;
 
                 %* Print to log;
@@ -75,10 +103,13 @@
                     length elabel $200;
                     elabel=strip(tranwrd(tranwrd(label, '"', ''), "'", ''));
 
-                    putlog 'verisian-lib:' libname+(-1) '|||ds:' memname+(-1)
-                        '|||var:' name+(-1) '|||label:"' elabel+(-1) '"|||type:'
-                        type+(-1) '|||length:' length+(-1) '|||format:'
-                        format+(-1);
+                    putlog 'verisian-lib:' libname+(-1)
+                           '|||ds:' memname+(-1)
+                           '|||var:' name+(-1)
+                           '|||label:"' elabel+(-1) '"'
+                           '|||type:' type+(-1)
+                           '|||length:' length+(-1)
+                           '|||format:' format+(-1);
                 run;
             %end;
             %else %do;
@@ -90,34 +121,6 @@
         option notes;
         option mprint;
 
-    %mend v_init;
+    %end; %* verisian_toggle check;
 
-    /*
-     * Testing;
-    options dlcreatedir;
-    libname tmp '/tmp/tmp-library';
-    options nodlcreatedir;
-
-    data tmp.a;
-    x=1;
-    y=2;
-    z="";
-    run;
-
-    data tmp.b;
-    x=1;
-    y=2;
-    z="";
-    run;
-
-    data tmp.c;
-    x=1;
-    y=2;
-    z="";
-    run;
-
-    option mprint;
-    %v_init(library=tmp);
-    %v_init(datasets=tmp.a tmp.b);
-    %v_init(datasets=tmp.d);
-     */
+%mend v_init;
